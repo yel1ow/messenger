@@ -19,12 +19,20 @@ public class Client extends JFrame implements TCPConnectionObserver {
     public static final String NAME = "Skype v3.22";
     private static final String IP_ADDR = "0.tcp.ngrok.io";
     private int Port = 3228;
+
     public AuthorizationWindow authorizationWindow;
     public RegistrationWindow registrationWindow;
     private MainWindow mainWindow;
+
     private static int WIDTH = 640;
     private static int HEIGHT = 480;
-    private static int CLIENT_CONNECTED = 3;
+
+    private final int AUTHORIZATION = 0;
+    private final int REGISTRATION = 1;
+    private final int MESSAGE = 2;
+    private final int CLIENT_CONNECTED = 3;
+    private final int CLIENT_DISCONNECTED = 4;
+
     final Lock mainWindowReady = new ReentrantLock();
     private boolean authorized = false;
 
@@ -67,105 +75,87 @@ public class Client extends JFrame implements TCPConnectionObserver {
 
     @Override
     public void onReceiveString(TCPConnection tcpConnection, String string) {
-//        if(string == null) {
-//            printMsg("NULL String received in Client.onReceiveString???????????");
-//            return;
-//        }
         printMsg("received string: " + string);
-        if(!authorized && !(string.charAt(0) == '0' || string.charAt(0) == '1')) {
-            printMsg("received string before authorization: " + string.charAt(0));
+        int spaceIndex = string.indexOf(" ");
+        int messageId = Integer.parseInt(string.substring(0, spaceIndex));
+        String receivedString = string.substring(spaceIndex + 1);
+        if(!authorized && !(messageId == 0 || messageId == 1)) {
+            printMsg("received string before authorization: " + Integer.toString(messageId));
             return;
         }
-        switch (string.charAt(0)) {
-            case '0':
-                receivedStringType0(tcpConnection, string);
+        switch (messageId) {
+            case AUTHORIZATION:
+                receivedAuthorization(tcpConnection, receivedString);
                 break;
-            case '1':
-                receivedStringType1(tcpConnection, string);
+            case REGISTRATION:
+                receivedRegistration(tcpConnection, receivedString);
                 break;
-            case '2':
-                receivedStringType2(tcpConnection, string);
+            case MESSAGE:
+                receivedMessage(tcpConnection, receivedString);
                 break;
-            case '3':
-                receivedStringType3(tcpConnection, string);
+            case CLIENT_CONNECTED:
+                receivedClientConnected(tcpConnection, receivedString);
                 break;
-            case '4':
-                receivedStringType4(tcpConnection, string);
-                break;
-            case '5':
-                receivedStringType5(tcpConnection, string);
+            case CLIENT_DISCONNECTED:
+                receivedClientDisconnected(tcpConnection, receivedString);
                 break;
         }
     }
 
-    private void receivedStringType0(TCPConnection tcpConnection, String string) {
-        final String content = string.substring(1);
-        if(content.charAt(0) == '0') {
+    private void receivedAuthorization(TCPConnection tcpConnection, String string) {
+        if(string.charAt(0) == '0') {
             SwingUtilities.invokeLater(new Runnable() {
                 @Override
                 public void run() {
-                    //authorizationWindow.printError("Authorization successful");
                     mainWindow = new MainWindow(Client.this);
                     authorized = true;
                     mainWindowReady.unlock();
                     authorizationWindow.dispose();
-                    receivedStringType5(tcpConnection, content);
+                    addUsersToForm(tcpConnection, string.substring(1));
                 }
             });
         } else {
-            SwingUtilities.invokeLater(() -> authorizationWindow.printError(content));
+            SwingUtilities.invokeLater(() -> authorizationWindow.printError(string));
         }
     }
 
-    private void receivedStringType1(TCPConnection tcpConnection, String string) {
-        printMsg("received " + string);
-        final String content = string.substring(1);
-        printMsg("content " + content);
-        if(content.equals("")) {
-            SwingUtilities.invokeLater(new Runnable() {
-                @Override
-                public void run() {
-                    //registrationWindow.printError("Registration successful");
-                    mainWindow = new MainWindow(Client.this);
-                    authorized = true;
-                    mainWindowReady.unlock();
-                    registrationWindow.dispose();
-                }
-            });
-        } else {
-            SwingUtilities.invokeLater(new Runnable() {
-                @Override
-                public void run() {
-                    registrationWindow.printError(content);
-                }
-            });
-        }
-    }
-
-    private void receivedStringType2(TCPConnection tcpConnection, String string) {
-        mainWindow.printMessage(string.substring(1));
-    }
-
-    private void receivedStringType3(TCPConnection tcpConnection, String string) {
-        mainWindowReady.lock();
-        mainWindow.usersTableModel.addData(string.substring(1));
-        mainWindow.usersTableModel.fireTableDataChanged();
-        mainWindowReady.unlock();
-    }
-
-    private void receivedStringType4(TCPConnection tcpConnection, String string) {
-        mainWindowReady.lock();
-        mainWindow.usersTableModel.removeData(string.substring(1));
-        mainWindow.usersTableModel.fireTableDataChanged();
-        mainWindowReady.unlock();
-    }
-
-    private void receivedStringType5(TCPConnection tcpConnection, String string) {
-        Scanner usersOnline = new Scanner(string.substring(1));
+    private void addUsersToForm(TCPConnection tcpConnection, String string) {
+        Scanner usersOnline = new Scanner(string);
         while(usersOnline.hasNext()) {
             mainWindow.usersTableModel.addData(usersOnline.next());
         }
         mainWindow.usersTableModel.fireTableDataChanged();
+    }
+
+    private void receivedRegistration(TCPConnection tcpConnection, String string) {
+        printMsg("string " + string);
+        if(string.charAt(0) == '0') {
+            Scanner scanner = new Scanner(string.substring(1));
+            String login = scanner.next();
+            String password = scanner.next();
+            connection.sendMessage(Integer.toString(AUTHORIZATION) + " " + login + " " + password);
+            registrationWindow.dispose();
+        } else {
+            registrationWindow.printError(string);
+        }
+    }
+
+    private void receivedMessage(TCPConnection tcpConnection, String string) {
+        mainWindow.printMessage(string);
+    }
+
+    private void receivedClientConnected(TCPConnection tcpConnection, String string) {
+        mainWindowReady.lock();
+        mainWindow.usersTableModel.addData(string);
+        mainWindow.usersTableModel.fireTableDataChanged();
+        mainWindowReady.unlock();
+    }
+
+    private void receivedClientDisconnected(TCPConnection tcpConnection, String string) {
+        mainWindowReady.lock();
+        mainWindow.usersTableModel.removeData(string);
+        mainWindow.usersTableModel.fireTableDataChanged();
+        mainWindowReady.unlock();
     }
 
     @Override
@@ -209,7 +199,7 @@ public class Client extends JFrame implements TCPConnectionObserver {
 
     public void logInButtonPressed(String login, String password) {
         StringBuilder stringBuilder = new StringBuilder();
-        stringBuilder.append("0");
+        stringBuilder.append(Integer.toString(AUTHORIZATION) + " ");
         stringBuilder.append(login);
         stringBuilder.append(" ");
         stringBuilder.append(password);
@@ -218,7 +208,7 @@ public class Client extends JFrame implements TCPConnectionObserver {
 
     public void registrationButtonPressed(ArrayList<String> fields) {
         StringBuilder stringBuilder = new StringBuilder();
-        stringBuilder.append("1");
+        stringBuilder.append(Integer.toString(REGISTRATION) + " ");
         for(int i = 0; i < fields.size() - 1; i++) {
             stringBuilder.append(fields.get(i));
             stringBuilder.append(" ");
@@ -227,6 +217,6 @@ public class Client extends JFrame implements TCPConnectionObserver {
         connection.sendMessage(stringBuilder.toString());
     }
     public void messageEntered(String message) {
-        connection.sendMessage("2" + message);
+        connection.sendMessage(Integer.toString(MESSAGE) + " " + message);
     }
 }
