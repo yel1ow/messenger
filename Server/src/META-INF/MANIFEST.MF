@@ -1,0 +1,4 @@
+Manifest-Version: 1.0
+Class-Path: mssql-jdbc-7.0.0.jre10.jar
+Main-Class: yel1ow.messenger.server.Server
+
